@@ -1,17 +1,37 @@
 {
+   "files": [
+      "src/index.ts"
+   ],
    "compilerOptions": {
       "target": "es5",
       "module": "commonjs",
       "declaration": true,
       "outDir": "./lib",
       "strict": true,
-      "sourceMap": true
+      "sourceMap": true,
+      "noEmit": false,
+      "noImplicitAny": true,
+      "strictNullChecks": true,
+      "strictFunctionTypes": true,
+      "strictBindCallApply": true,
+      "strictPropertyInitialization": true,
+      "noImplicitThis": true,
+      "alwaysStrict": true,
+      "noUnusedLocals": true,
+      "noUnusedParameters": true,
+      "noImplicitReturns": true,
+      "noFallthroughCasesInSwitch": true,
+      "noUncheckedIndexedAccess": true,
+      "noImplicitOverride": true,
+      "noPropertyAccessFromIndexSignature": true,
+      "esModuleInterop": true,
+      "forceConsistentCasingInFileNames": true,
+      "skipLibCheck": true
    },
    "include": [
       "src"
    ],
    "exclude": [
-      "node_modules",
-      "**/__tests__/*"
+      "node_modules"
    ]
 }
