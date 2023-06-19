@@ -8,5 +8,6 @@ export default class MatchGroups implements IMatchGroups {
    boolean: string[] = []
    scope: string[] = []
    iter: string[] = []
+   tag: string[] = []
    rules: any = {}
 }

@@ -29,8 +29,9 @@ export default interface ReservedList {
    mathOperators: string[]
    compare: string[]
    numbers: string[]
-   decimalSeparator: string,
+   decimalSeparator: string
    stringDefiners: string[]
    keySymbols: string[]
    endSymbols: string[]
+   spaces?: number
 }

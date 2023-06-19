@@ -11,6 +11,7 @@ export enum PartType {
    rule,
    var,
    iter,
+   tag,
    logicScope,
    prev,
    next,
@@ -22,7 +23,7 @@ export enum PartType {
 }
 
 export interface IRulePart {
-   type: PartType
+   readonly type: PartType
 }
 
 export interface IContentablePart {
@@ -35,4 +36,12 @@ export interface INamedPart {
 
 export interface IBreaketPart {
    breaket: string
+}
+
+export interface ITagPart {
+   openBreaket: string
+   closeBreaket: string
+   endCloseBreaket: string
+   tagName: IRulePart[]
+   attrValue: IRulePart[]
 }

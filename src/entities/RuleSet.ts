@@ -1,6 +1,6 @@
-import type Rule from "./Rule";
-import { RulePart, RulePartContent, RulePartKeyword, RulePartNamed, RulePartScope } from "./RulePart";
-import { IRulePart, PartType, type IContentablePart, type INamedPart } from "../types/RulePart";
+import Rule from "./Rule";
+import { RulePartContent, RulePartKeyword, RulePartNamed, RulePartScope, RulePartTag } from "./RulePart";
+import { IRulePart, PartType, type IContentablePart } from "../types/RulePart";
 import { removeArrElem } from '../utils/data';
 import type ReservedList from "../types/ReservedList";
 import MatchGroups from "./MatchGroups";
@@ -18,7 +18,7 @@ class RuleInfo {
    // list of text's iterators of rules
    iters: number[] = []
    // list of parts of rules, which have content
-   parts: RulePartContent[] = []
+   parts: IContentablePart[] = []
    // list of indexes of parts of rules, which have content
    indexes: number[] = [0]
    // list of objects with variables, which part contain inside
@@ -42,11 +42,15 @@ class RuleInfo {
 class ScopeInfo {
    start: number
    end: number
+   rules: RuleInfo[]
+   index: number
    matches: SyntaxItem[]
 
-   constructor(start: number, end: number, matches: SyntaxItem[]) {
+   constructor(start: number, end: number, rules: RuleInfo[], index: number, matches: SyntaxItem[]) {
       this.start = start
       this.end = end
+      this.rules = rules
+      this.index = index
       this.matches = matches
    }
 }
@@ -59,7 +63,7 @@ interface MatchError {
    end: number
 }
 
-interface RuleMatches {
+export interface RuleMatches {
    groups: MatchGroups
    matches: SyntaxItem[]
    errors: MatchError[]
@@ -78,7 +82,7 @@ export default class RuleSet {
     * @param {Rule<any>[]}    rules - array of rules with which code will processed
     * @param {ReservedList}   reserved - object with reserved symbols and words
     */
-   constructor(rules: Rule<any>[], reserved: ReservedList) {
+   constructor(rules: Rule<SyntaxItem>[], reserved: ReservedList) {
 
       this.addRule(rules)
       this.reserved = reserved
@@ -101,9 +105,6 @@ export default class RuleSet {
       // add arrays for all groups of base matches and rules
       this.rules.forEach(rule => result.groups.rules[rule.name] = [])
 
-      // list of objects for rule's data object
-      let rules: RuleInfo[] = []
-
       // current rule
       let rule: RuleInfo
 
@@ -113,11 +114,16 @@ export default class RuleSet {
       // how process current part of rule
       let mode: PartType
 
+      // if a number is placed, it means that the tab area has been opened. If a line starting with < was inserted, this is a tag, otherwise the string means () {} []
+      let breakets: (string | number)[] = []
+
       // list of text's areas for processing text by nesting level
-      let scopesQueue: ScopeInfo[] = [new ScopeInfo(0, code.length, result.matches)]
+      let scopesQueue: ScopeInfo[] = [new ScopeInfo(0, code.length, [], 0, result.matches)]
+
+      let scope: ScopeInfo
 
       let iters: number[]
-      let parts: RulePartContent[]
+      let parts: IContentablePart[]
       let indexes: number[]
       let variables: object[]
       let strings: Match[][]
@@ -126,15 +132,20 @@ export default class RuleSet {
       let permissibles: []
 
       // process the code while there are areas of text
-      while (scopesQueue[0]) {
+      while (scopesQueue.length > 0) {
+
+         scope = scopesQueue[scopesQueue.length - 1] as ScopeInfo
 
          // init data object for every rules
-         rules = this.rules.map(rule => new RuleInfo(rule, (scopesQueue[0] as ScopeInfo).start))
+         if (scope.rules.length == 0) {
+
+            scope.rules = this.rules.map(rule => new RuleInfo(rule, (scopesQueue[0] as ScopeInfo).start))
+         }
 
          // select the most appropriate rule one by one
-         for (let j = 0; j < rules.length; j++) {
+         for (let j = scope.index; j < scope.rules.length; j++) {
 
-            rule = rules[j] as RuleInfo
+            rule = scope.rules[j] as RuleInfo
 
             iters = rule.iters
             parts = rule.parts
@@ -147,7 +158,7 @@ export default class RuleSet {
 
             // process rule while rule's main scope in pattern wasn't delete or pattern pass validity check
             // if there are more rules that might fit, the occurrence of a validation error will remove the given rule from the list as unsuitable
-            while (parts.length > 0 && (checks[0] || rules.length == 1)) {
+            while (parts.length > 0 && (checks[0] || scope.rules.length == 1)) {
 
                // if current symbol is enter or backspace, skip it
                let symbol = code[iters[iters.length - 1] as number]
@@ -347,125 +358,172 @@ export default class RuleSet {
 
                         case PartType.text:
 
-                           let text = ''
+                           let text: string = ''
 
-                           let c: number = iters[iters.length - 1] as number
+                           let end: number
 
-                           for (c; c < code.length; c++) {
+                           let nextPart: IRulePart | undefined = (parts[parts.length - 1] as IContentablePart).content[indexes[indexes.length - 1] as number + 1]
 
-                              if (this.reserved.keySymbols.indexOf(code[c] as string) == -1) {
+                           let iter = iters[iters.length - 1] as number
 
-                                 text += code[c]
-                              }
-                              else {
+                           if (nextPart) {
 
-                                 if (text.length == 0) {
+                              let breakWords: string[] = []
 
-                                    checks[checks.length - 1] = false
-                                 }
+                              let nextMode: PartType = nextPart.type
 
-                                 break
-                              }
-                           }
+                              while (breakWords.length) {
 
-                           if (checks[checks.length - 1]) {
+                                 switch (nextMode as any) {
 
-                              addMatch(rule, c, text)
-                           }
+                                    case PartType.keyword:
 
-                           break
-
-                           let any = ''
-
-                           let o = iters[iters.length - 1]
-
-                           // let breaks = []
-
-                           let nextPart = pattern[pattern.length - 1][indexes[indexes.length - 1] as number + 1]
-                           let nextMode = typeof nextPart == 'string' ? 'word' : nextPart.type
-
-                           // while (breaket.length == 0) {
-
-                           //    switch (nextMode) {
-
-                           //       case 'word':
-
-                           //          breaks.push(nextPart[0])
-
-                           //          break
-
-                           //       case 'var':
-                           //       case 'iter':
-                           //       case 'scope_$':
-                           //       case '*':
-                           //       case '+':
-                           //       case '?':
-                           //       case '<':
-                           //       case '<!':
-
-                           //          nextPart = nextPart.content[0]
-
-                           //          break
-
-
-                           //       case '>!':
-                           //       case '>':
-
-                           //          nextPart = nextPart.content[1]
-
-                           //          break
-
-                           //       case 'rule':
-
-                           //          let varPart = this.rules.find(rule => rule.name == nextPart.name)
-                           //          nextPart = nextPart.content[1]
-
-
-                           //          break
-
-                           //       case 'or':
-
-
-                           //          break
-
-                           //       case 'scope':
-
-                           //          breaks.push(nextPart.breakets)
-
-                           //          break
-
-                           //       default:
-                           //          break;
-                           //    }
-                           // }
-
-                           let p = 0
-
-                           if (nextMode == 'word') {
-
-                              for (o; o < code.length; o++) {
-
-                                 if (code[o] != nextPart[p]) {
-
-                                    text += code[o]
-
-                                    p = 0
-                                 }
-                                 else {
-
-                                    if (p + 1 == nextPart.length) {
-
-                                       addMatch(rules[j], o - nextPart.length, any)
+                                       breakWords.push((nextPart as RulePartKeyword).name)
 
                                        break
-                                    }
-                                    else {
 
-                                       ++p
-                                    }
+                                    // * пока не знаю можно ли это обработать
+                                    case PartType.text:
+                                       // throw error
+                                       break
+
+                                    case PartType.boolean:
+
+                                       breakWords.push(...this.reserved.booleans)
+
+                                       break
+
+                                    case PartType.number:
+
+                                       breakWords.push(...this.reserved.numbers)
+
+                                       break
+
+                                    case PartType.string:
+
+                                       breakWords.push(...this.reserved.stringDefiners)
+
+                                       break
+
+                                    case PartType.var:
+                                    case PartType.iter:
+                                    case PartType.logicScope:
+                                    case PartType.oneMore:
+                                    case PartType.zeroMore:
+                                    case PartType.maybe:
+                                    case PartType.prev:
+                                    case PartType.noPrev:
+
+                                       nextPart = (nextPart as RulePartContent).content[0]
+
+                                       break
+
+                                    case PartType.tag:
+
+                                       breakWords.push((nextPart as RulePartTag).openBreaket)
+
+                                       break
+
+                                    case PartType.next:
+                                    case PartType.noNext:
+
+                                       nextPart = (nextPart as RulePartContent).content[1]
+
+                                       break
+
+                                    case PartType.rule:
+
+                                       let nextRule = this.rules.find(rule => rule.name == (nextPart as RulePartNamed).name)
+
+                                       if (nextRule) {
+
+                                          nextPart = nextRule.parts[0]
+                                       }
+                                       else {
+                                          // throw error undefined rule
+                                       }
+
+                                       break
+
+                                    // * пока выкидываю error, но в будущем можно сделаить нормальную обработку. однако для пользователя это всё равно будет нежелательным, алгоритм может требовать много ресурсов
+                                    case PartType.or:
+
+                                       // throw error
+
+                                       break
+
+                                    case PartType.scope:
+
+                                       breakWords.push((nextPart as RulePartScope).breaket)
+
+                                       break
+
+                                    default:
+                                       break;
                                  }
                               }
+
+                              let breakIndexes: number[] = breakWords.map(item => code.indexOf(item, iter))
+
+                              let minIndex = breakIndexes.sort((a, b) => a - b)[0] as number
+
+                              text = code.slice(iter, minIndex)
+
+                              end = minIndex
                            }
+                           else {
+
+                              let breakSymbol
+
+                              let i = 1
+
+                              let scope = parts[parts.length - i]
+
+                              while (!(scope instanceof RulePartScope || scope instanceof RulePartTag)) {
+
+                                 if (parts.length == i) {
+
+                                    break
+                                 }
+
+                                 ++i
+
+                                 scope = parts[parts.length - i]
+                              }
+
+                              if (scope instanceof RulePartScope) {
+
+                                 if (scope.breaket == '(' || scope.breaket == '{' || scope.breaket == '[') {
+
+                                    end = code.indexOf(Rule.breakets.get(scope.breaket) as string, iter)
+
+                                    text = code.slice(iter, end)
+                                 }
+
+                                 if (scope.breaket == '&') {
+
+
+                                 }
+                              }
+                              else if (scope instanceof RulePartTag) {
+
+                                 for (let i = 0; i < code.length; i++) {
+
+
+
+                                 }
+
+                              } else {
+
+                                 let scope = scopesQueue[scopesQueue.length - 1] as ScopeInfo
+
+                                 end = scope.end
+
+                                 text = code.slice(iters[iters.length - 1], end)
+                              }
+                           }
+
+                           addMatch(rule, end, text)
 
                            break
 
@@ -490,63 +548,76 @@ export default class RuleSet {
 
                            if ((part as RulePartScope).breaket == '&') {
 
-                              let tabs: number[] = [];
+                              let i = iters[iters.length - 1] as number
 
-                              for (let i = iters[iters.length - 1]; i > 0; --i) {
+                              for (i; i < code.length; i++) {
 
-                              }
+                                 if (code[i] == '/n') {
 
-                              for (let i = iters[iters.length - 1]; i < scopesQueue[0].end; i++) {
+                                    ++i
 
-                              }
-                           }
-
-                           if (code[rules[j].iters[rules[j].iters.length - 1]] == (part as RulePartScope).breaket) {
-
-                              if ((part as RulePartScope).content.length == 0) {
-
-                                 let breakets: string[] = []
-
-                                 for (let i = rules[j].iters[rules[j].iters.length - 1]; i < scopesQueue[0].end; i++) {
-
-                                    if (code[i] == '(' || code[i] == '[' || code[i] == '{') {
-
-                                       breakets.push(code[i])
-                                    }
-                                    else if (code[i] == ')' || code[i] == ']' || code[i] == '}') {
-
-                                       if (this.parenthesis[breakets[breakets.length - 1]] == code[i]) {
-
-                                          breakets.pop()
-
-                                          if (breakets.length == 0) {
-
-                                             let matchArr = []
-
-                                             matchesArr[matchesArr.length - 1].push({ start: iters[iters.length - 1], end: i, matchArr })
-
-                                             break
-                                          }
-                                       }
-                                       else {
-
-                                          // createBaseSyntaxError()
-                                       }
-                                    }
+                                    break
                                  }
                               }
-                              else {
 
-                                 addScope()
+                              let spacesCount = 0
+
+                              for (i; i < code.length; i++) {
+
+                                 if (code[i] != ' ') {
+
+                                    iters[iters.length - 1] = i
+
+                                    break
+                                 }
+
+                                 ++spacesCount
                               }
+
+                              let lastTabSpacesCount: number | undefined
+
+                              for (let i = breakets.length; i >= 0; i--) {
+
+                                 if (typeof breakets[i] == 'number') {
+
+                                    lastTabSpacesCount = breakets[i] as number
+
+                                    break
+                                 }
+                              }
+
+                              if (lastTabSpacesCount != undefined) {
+
+                                 if (spacesCount - lastTabSpacesCount != (this.reserved?.spaces as number)) {
+
+                                    // throw error
+                                 }
+                              }
+
+                              breakets.push(spacesCount)
                            }
                            else {
 
-                              rules[j].checks[rules[j].checks.length - 1] = false
+                              symbol = code[iters[iters.length - 1] as number]
+
+                              if ((symbol == '{' || symbol == '[' || symbol == '(') && (part as RulePartScope).) {
+
+                                 breakets.push(symbol)
+                              }
+                              else {
+
+                                 // throw error
+                              }
                            }
+
+                           addScope()
 
                            break
 
+                        case PartType.tag:
+
+                           addScope()
+                           break
                         default:
                            break
                      }
@@ -934,17 +1005,17 @@ export default class RuleSet {
             }
 
             // delete rule if it fails the test and there are more rules that might fit
-            if (!rules[j].checks[0] && rules.length > 1) {
+            if (!(scope.rules[j] as RuleInfo).checks[0] && scope.rules.length > 1) {
 
-               rules = removeArrElem(rules, j)
+               scope.rules = removeArrElem(scope.rules, j)
 
                --j
             }
 
             // if the rule check for the code section was completed, create match and add it in matches groups and list
-            if (rules.length == 1) {
+            if (scope.rules.length == 1) {
 
-               rules[j].variables.start = scopesQueue[0]
+               (scope.rules[j] as RuleInfo).variables.start = scopesQueue[0]
 
 
                let match = rules[j].createMatch(variables, strings, scopesQueue[0].start, iters[0])
@@ -959,7 +1030,7 @@ export default class RuleSet {
             }
 
             // generate an undefined character or keyword error if no rule was matched
-            if (rules.length == 0) {
+            if (scope.rules.length == 0) {
 
                let string = ''
 

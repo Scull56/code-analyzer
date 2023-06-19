@@ -1,38 +1,43 @@
-import { RulePart, RulePartNamed, RulePartScope, RulePartContent, RulePartKeyword } from "./RulePart";
+import { RulePartPrimitive, RulePartNamed, RulePartScope, RulePartContent, RulePartKeyword, RulePartTag } from "./RulePart";
 import { PartType, type IContentablePart, IRulePart } from '../types/RulePart';
 import SyntaxItem from "../types/SyntaxItem";
 
-enum EndsType {
+enum EndType {
    scope,
    logicScope,
    part,
    or,
-   orPart
+   orPart,
+   comma
 }
+
+// * добавить спец символ пустого пространства
 
 /**
  * Rule accorging to which will checked a character sequence
  * 
  * @prop {string}       name - string with an identifyer for use in $rule() construction
- * @prop {RulePart[]}   parts - transformed pattern string into rule's parts for processing code
+ * @prop {IRulePart[]}   parts - transformed pattern string into rule's parts for processing code
  */
 export default class Rule<T extends SyntaxItem>{
    name: string;
-   parts: RulePart[] = [];
+   parts: IRulePart[] = [];
 
    public static breakets: Map<string, string> = new Map([
       ['{', '}'],
       ['[', ']'],
       ['(', ')'],
-      // tags
-      ['^', '^'],
       // tabs
-      ['&', '&']
+      ['&', '#']
    ])
 
-   private static keySymbols = ['(', ')', '{', '}', '[', ']', '$', '|', '&', '^']
+   private static keySymbols = ['(', ')', '{', '}', '[', ']', '$', '|', '&', '#', ',', ' ']
 
-   private static keyWords = ['string', 'text', 'number', 'boolean', 'rule', 'iter']
+   private static openKeySymbols = ['[', '(', '{', '&']
+
+   private static closeKeySymbols = [']', ')', '}', '#']
+
+   private static keyWords = ['string', 'text', 'number', 'boolean', 'rule', 'iter', 'tag']
 
    /**
     * Constructor of Rule class
@@ -53,7 +58,7 @@ export default class Rule<T extends SyntaxItem>{
       // process the last item in the list
       let scopes: IContentablePart[] = [mainScope]
       // take the last item of list and associated with precessed scope
-      let ends: EndsType[] = [EndsType.scope]
+      let ends: EndType[] = [EndType.scope]
       // store breakets what would understand which scope closed
       let breakets: string[] = []
       // define how interpret precessed symbol
@@ -65,8 +70,10 @@ export default class Rule<T extends SyntaxItem>{
       // current symbol
       let current: string
 
+      let currentScope: IContentablePart
+
       // created objects of scopes
-      let partObj: RulePart
+      let partObj: IRulePart
 
       for (i; i < pattern.length; i++) {
 
@@ -80,40 +87,34 @@ export default class Rule<T extends SyntaxItem>{
             continue
          }
 
-         if (current == '/' && !shield) {
+         if (!shield) {
 
-            shield = true
+            if (current == '/') {
 
-            ++i
-         }
+               shield = true
 
-         if ([']', ')', '}', '&', '^'].indexOf(current) > -1) {
-
-            if (current == '&' || current == '^') {
-
-               let lastEnd = breakets[breakets.length - 1];
-
-               if (lastEnd == '&' || lastEnd == '^') {
-
-                  closeScope()
-
-                  continue
-               }
+               continue
             }
-            else {
+
+            if (Rule.closeKeySymbols.indexOf(current) > -1) {
 
                closeScope()
 
                continue
             }
-         }
 
-         if (['[', '(', '{', '&', '^'].indexOf(current) > -1) {
+            if (Rule.openKeySymbols.indexOf(current) > -1) {
 
-            mode = PartType.scope
-         }
+               mode = PartType.scope
+            }
 
-         if (!shield) {
+            if (current == ',') {
+
+               if (scopes[scopes.length - 1] instanceof RulePartTag) {
+
+                  mode = PartType.tag
+               }
+            }
 
             if (current == '|') {
 
@@ -123,108 +124,114 @@ export default class Rule<T extends SyntaxItem>{
             if (current == '$') {
 
                ++i
+
+               current = pattern[i] as string
             }
-         }
 
-         if (mode === undefined) {
+            if (mode === undefined) {
 
-            if (['?', '>', '<', '+', '*'].indexOf(current) > -1) {
+               if (['?', '>', '<', '+', '*'].indexOf(current) > -1) {
 
-               if ((current == '<' || current == '>') && pattern[i + 1] == '!') {
+                  if ((current == '<' || current == '>') && pattern[i + 1] == '!') {
 
-                  mode = current + pattern[i + 1] == '<!' ? PartType.noPrev : PartType.noNext
+                     mode = current + pattern[i + 1] == '<!' ? PartType.noPrev : PartType.noNext
 
-                  i += 2
+                     i += 2
+                  }
+                  else {
+
+                     mode = current == '<' ? PartType.prev : PartType.next
+
+                     ++i
+                  }
+               }
+               else if (current == '(') {
+
+                  mode = PartType.logicScope
                }
                else {
 
-                  mode = current == '<' ? PartType.prev : PartType.next
+                  let string = ''
 
-                  ++i
-               }
-            }
-            else if (current == '(') {
+                  let keywords: string[] = Rule.keyWords;
 
-               mode = PartType.logicScope
-            }
-            else {
+                  for (let j = i; j < pattern.length; j++) {
 
-               let string = ''
+                     string += pattern[j]
 
-               let keywords: string[] = Rule.keyWords;
+                     // add one character each iteration and look at which keywords start with this character set until there is one suitable variant left
+                     keywords = keywords.filter(keyword => keyword.indexOf(string) == 0)
 
-               for (let j = i; j < pattern.length; j++) {
+                     if (keywords.length == 1) {
 
-                  string += pattern[j]
+                        let keyword: string = keywords[0] as string
 
-                  // add one character each iteration and look at which keywords start with this character set until there is one suitable variant left
-                  keywords = keywords.filter(keyword => keyword.indexOf(string) == 0)
+                        let check = true
 
-                  if (keywords.length == 1) {
+                        // compare the correctness of the sequence of characters in the pattern string and the keyword, starting from the last character where the previous check was stopped
+                        for (++j; j - i < keyword.length; j++) {
 
-                     let keyword: string = keywords[0] as string
+                           if (pattern[j] != keyword[j - i]) {
 
-                     let check = true
+                              check = false
 
-                     // compare the correctness of the sequence of characters in the pattern string and the keyword, starting from the last character where the previous check was stopped
-                     for (++j; j - i < keyword.length; j++) {
+                              break
+                           }
+                        }
 
-                        if (pattern[j] != keyword[j - i]) {
+                        if (check) {
 
-                           check = false
+                           switch (keyword) {
+
+                              case 'string':
+                                 mode = PartType.string
+                                 break;
+
+                              case 'text':
+                                 mode = PartType.text
+                                 break;
+
+                              case 'number':
+                                 mode = PartType.number
+                                 break;
+
+                              case 'boolean':
+                                 mode = PartType.boolean
+                                 break;
+
+                              case 'rule':
+                                 mode = PartType.rule
+                                 break;
+
+                              case 'iter':
+                                 mode = PartType.iter
+                                 break;
+
+                              case 'tag':
+                                 mode = PartType.tag
+                                 break;
+
+                              default:
+                                 break;
+                           }
+
+                           i = j
 
                            break
                         }
+                        else {
+
+                           keywords.pop()
+                        }
                      }
 
-                     if (check) {
+                     // if none keyword was not defined, mean was define name of variable in which need put results of pattern checks 
+                     if (keywords.length == 0) {
 
-                        switch (keyword) {
-                           case 'string':
-                              mode = PartType.string
-                              break;
-
-                           case 'text':
-                              mode = PartType.text
-                              break;
-
-                           case 'number':
-                              mode = PartType.number
-                              break;
-
-                           case 'boolean':
-                              mode = PartType.boolean
-                              break;
-
-                           case 'rule':
-                              mode = PartType.rule
-                              break;
-
-                           case 'iter':
-                              mode = PartType.iter
-                              break;
-
-                           default:
-                              break;
-                        }
-
-
-                        i = j
+                        mode = PartType.var
 
                         break
                      }
-                     else {
-
-                        keywords.pop()
-                     }
-                  }
-
-                  // if none keyword was not defined, mean was define name of variable in which need put results of pattern checks 
-                  if (keywords.length == 0) {
-
-                     mode = PartType.var
-
-                     break
                   }
                }
             }
@@ -241,7 +248,7 @@ export default class Rule<T extends SyntaxItem>{
                   current = pattern[i] as string
 
                   // if process word, add to string all, except this symbols, if they are not shielded or space
-                  if ((Rule.keySymbols.indexOf(current) == -1 || (current == '$' || current == '|') && shield) && current != ' ') {
+                  if ((shield || Rule.keySymbols.indexOf(current) == -1)) {
 
                      if (current == '/' && !shield) {
 
@@ -262,6 +269,8 @@ export default class Rule<T extends SyntaxItem>{
                      // reduce iterator to process special symbol in next iteration of loop
                      --i
 
+                     current = pattern[i] as string
+
                      break
                   }
                }
@@ -270,13 +279,12 @@ export default class Rule<T extends SyntaxItem>{
 
                break
 
-            // if in pattern used $()
             case PartType.logicScope:
 
-               let scope = new RulePartContent(mode, [])
+               let scope = new RulePartContent(PartType.logicScope, [])
 
                addInScope(scope)
-               addScope(scope, EndsType.logicScope)
+               addScope(scope, EndType.logicScope)
 
                break
 
@@ -288,27 +296,35 @@ export default class Rule<T extends SyntaxItem>{
             case PartType.zeroMore:
             case PartType.maybe:
 
-               let currentScope = scopes[scopes.length - 1] as IContentablePart
+               currentScope = scopes[scopes.length - 1] as IContentablePart
 
-               let content: RulePart[] = []
+               let partContent: IRulePart[] = []
 
                // for < > <! and >! must added in content part of pattern placed before it special symbols
                if (mode as PartType != PartType.oneMore &&
                   mode as PartType != PartType.zeroMore &&
                   mode as PartType != PartType.maybe) {
 
-                  content = [
+                  partContent = [
                      currentScope.content[currentScope.content.length - 1] as IRulePart
                   ]
 
-                  // delete added part of pattern from processed scope
                   currentScope.content.pop()
                }
 
-               partObj = new RulePartContent(mode, content)
+               type t =
+                  PartType.prev |
+                  PartType.next |
+                  PartType.noPrev |
+                  PartType.noNext |
+                  PartType.oneMore |
+                  PartType.zeroMore |
+                  PartType.maybe
+
+               partObj = new RulePartContent(mode as t, partContent)
 
                addInScope(partObj)
-               addScope(partObj as RulePartContent, current == '(' ? EndsType.scope : EndsType.part)
+               addScope(partObj as RulePartContent, current == '(' ? EndType.scope : EndType.part)
 
                if (current != '(') {
 
@@ -322,15 +338,15 @@ export default class Rule<T extends SyntaxItem>{
 
                let end = ends[ends.length - 1]
 
-               if (end == EndsType.scope || end == EndsType.logicScope) {
+               if (end == EndType.scope || end == EndType.logicScope) {
 
-                  let content: RulePart[] = [...(scopes[scopes.length - 1] as IContentablePart).content];
+                  let content: IRulePart[] = [...(scopes[scopes.length - 1] as IContentablePart).content];
 
                   // add all processed parts of pattern in current scope and add they in new or scope, in array
-                  partObj = new RulePartContent(mode, content)
+                  partObj = new RulePartContent(PartType.or, content)
 
                   // replace $() to or scope, finded previous scope
-                  if (end == EndsType.logicScope) {
+                  if (end == EndType.logicScope) {
 
                      let prevScope = scopes[scopes.length - 2] as IContentablePart
 
@@ -348,7 +364,7 @@ export default class Rule<T extends SyntaxItem>{
                }
 
                //delete or_part to start new or_part
-               if (end == EndsType.orPart) {
+               if (end == EndType.orPart) {
 
                   scopes.pop()
                   ends.pop()
@@ -358,7 +374,7 @@ export default class Rule<T extends SyntaxItem>{
                let orPart = new RulePartContent(PartType.orPart, [])
 
                addInScope(orPart)
-               addScope(orPart, EndsType.orPart)
+               addScope(orPart, EndType.orPart)
 
                break
 
@@ -367,7 +383,7 @@ export default class Rule<T extends SyntaxItem>{
             case PartType.boolean:
             case PartType.text:
 
-               partObj = new RulePart(mode)
+               partObj = new RulePartPrimitive(mode as PartType.string | PartType.number | PartType.boolean | PartType.text)
 
                // when defined this mode for process, made current symbol is next, which placed after define this special words, that's why reduce iterator
                --i
@@ -414,7 +430,7 @@ export default class Rule<T extends SyntaxItem>{
 
                   if (names.length > 1) {
 
-                     let content: RulePart[] = names.map(name => {
+                     let content: IRulePart[] = names.map(name => {
                         return new RulePartContent(PartType.orPart, [
                            new RulePartNamed(PartType.rule, name, [])
                         ])
@@ -454,28 +470,134 @@ export default class Rule<T extends SyntaxItem>{
                partObj = new RulePartNamed(PartType.var, varName, [])
 
                addInScope(partObj)
-               addScope(partObj as RulePartNamed, current == ')' ? EndsType.scope : EndsType.part)
+               addScope(partObj as RulePartNamed, current == ')' ? EndType.scope : EndType.part)
 
                break;
 
             case PartType.iter:
 
-               if (current == ')' || current == ':') {
+               if (current == '(' || current == ':') {
 
                   partObj = new RulePartContent(PartType.iter, [])
 
                   addInScope(partObj)
-                  addScope(partObj as RulePartContent, current == ')' ? EndsType.scope : EndsType.part)
+                  addScope(partObj as RulePartContent, current == '(' ? EndType.scope : EndType.part)
                }
 
                break
 
             case PartType.scope:
 
-               partObj = new RulePartScope(PartType.scope, current, [])
+               partObj = new RulePartScope(current, [])
 
                addInScope(partObj)
-               addScope(partObj as RulePartScope, EndsType.scope)
+               addScope(partObj as RulePartScope, EndType.scope)
+
+               break;
+
+            case PartType.tag:
+
+               let currentPartScope = scopes[scopes.length - 1] as RulePartTag
+
+               // if current tag part already was processed, continue process tagName, attrValue and tagContent
+               if (currentPartScope.type == PartType.tag) {
+
+                  let tagPartContent: IRulePart[] = []
+
+                  let tagPart: IContentablePart = {
+                     content: tagPartContent
+                  }
+
+                  if (currentPartScope.tagName.length == 0) {
+
+                     currentPartScope.tagName = tagPartContent
+                  }
+                  else if (currentPartScope.attrValue.length == 0) {
+
+                     currentPartScope.attrValue = tagPartContent
+                  }
+                  else if (currentPartScope.content.length == 0) {
+
+                     currentPartScope.content = tagPartContent
+                  }
+                  else {
+
+                     // throw error
+                  }
+
+                  addScope(tagPart, EndType.comma)
+               }
+               // else extract from string breakets of tag
+               else if (current == '(') {
+
+                  let openBreaket: string = ''
+                  let closeBreaket: string = ''
+                  let endCloseBreaket: string = ''
+
+                  let string = ''
+
+                  for (let j = 0; j < pattern.length; j++) {
+
+                     if (pattern[j] == ' ') {
+
+                        continue
+                     }
+
+                     if (pattern[j] == '/' && !shield) {
+
+                        shield = true
+
+                        continue
+                     }
+
+                     if ((pattern[j] == ',') && !shield) {
+
+                        if (string.length == 0) {
+                           // throw error
+                        }
+
+                        if (openBreaket == '') {
+
+                           openBreaket = string
+
+                           string = ''
+                        }
+
+                        if (closeBreaket == '') {
+
+                           closeBreaket = string
+
+                           string = ''
+                        }
+
+                        if (endCloseBreaket == '') {
+
+                           endCloseBreaket = string
+
+                           string = ''
+
+                           i = --j
+
+                           break
+                        }
+                     }
+
+                     if (shield) {
+
+                        shield = false
+                     }
+
+                     string += pattern[j]
+                  }
+
+                  partObj = new RulePartTag(openBreaket, closeBreaket, endCloseBreaket, [], [], [])
+
+                  addInScope(partObj)
+                  addScope(partObj as RulePartContent, EndType.scope)
+               }
+               else {
+                  // throw error
+               }
 
                break;
 
@@ -486,24 +608,32 @@ export default class Rule<T extends SyntaxItem>{
 
       this.parts = mainScope.content
 
-      function addScope(scope: IContentablePart, endMode: EndsType) {
+      function addScope(scope: IContentablePart, endMode: EndType) {
+
+         // delete prev comma part
+         if (endMode == EndType.comma && ends[ends.length - 1] == EndType.comma) {
+
+            scopes.pop()
+            ends.pop()
+         }
 
          scopes.push(scope)
          ends.push(endMode)
 
          // consider breakets only if need close scope  
-         if (endMode == EndsType.scope || endMode == EndsType.logicScope) {
+         if (endMode == EndType.scope || endMode == EndType.logicScope) {
 
             breakets.push(current)
          }
       }
 
-      function addInScope(part: RulePart) {
+      function addInScope(part: IRulePart) {
 
          (scopes[scopes.length - 1] as IContentablePart).content.push(part)
 
          // close scope if in content current scope need add only next placed part of pattern
-         if (ends[ends.length - 1] == EndsType.scope) {
+
+         if (ends[ends.length - 1] == EndType.part) {
 
             closeScope()
          }
@@ -511,40 +641,51 @@ export default class Rule<T extends SyntaxItem>{
 
       function closeScope() {
 
-         // delete or_part and or scope
-         if (ends[ends.length - 1] == EndsType.orPart) {
+         switch (ends[ends.length - 1]) {
 
-            scopes.pop()
-            scopes.pop()
-            ends.pop()
-            ends.pop()
-         }
+            // delete or_part and or scope, comma and it's container
+            case EndType.comma:
+            case EndType.orPart:
 
-         // close scope if was finded corresponding to it close breaket
-         if (ends[ends.length - 1] == EndsType.scope || ends[ends.length - 1] == EndsType.logicScope) {
-
-            if (Rule.breakets.get(breakets[breakets.length - 1] as string) == current) {
-
-               breakets.pop()
+               scopes.pop()
                scopes.pop()
                ends.pop()
-            }
-            else {
+               ends.pop()
 
-               //throw error
-            }
-         }
+               break
 
-         // close all scopes, which need close after processing after it placed pattern parts
-         if (ends[ends.length - 1] == EndsType.part) {
+            // close scope if was finded corresponding to it close breaket
+            case EndType.scope:
+            case EndType.logicScope:
 
-            scopes.pop()
-            ends.pop()
+               if (Rule.breakets.get(breakets[breakets.length - 1] as string) == current) {
 
-            if (ends[ends.length - 1] == EndsType.part) {
+                  breakets.pop()
+                  scopes.pop()
+                  ends.pop()
+               }
+               else {
 
-               closeScope()
-            }
+                  //throw error
+               }
+
+               break
+
+            // close all scopes, which need close after processing after it placed pattern parts
+            case EndType.part:
+
+               scopes.pop()
+               ends.pop()
+
+               if (ends[ends.length - 1] == EndType.part) {
+
+                  closeScope()
+               }
+
+               break
+
+            default:
+               break
          }
       }
    }
