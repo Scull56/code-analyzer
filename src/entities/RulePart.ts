@@ -1,4 +1,5 @@
-import { PartType, type IRulePart, type IContentablePart, type INamedPart, type IBreaketPart, ITagPart } from '../types/RulePart';
+import type { IRulePart, IContentablePart, INamedPart, IBreaketPart, ITagPart, ISetPart } from '../types/RulePart';
+import { PartType } from '../types/RulePart';
 
 export abstract class RulePart implements IRulePart {
    type: PartType
@@ -39,7 +40,7 @@ export class RulePartContent extends RulePart implements IContentablePart {
    }
 }
 
-type NamedContanteblePartType = PartType.var | PartType.rule
+type NamedContanteblePartType = PartType.var | PartType.rule | PartType.event
 
 export class RulePartNamed extends RulePart implements INamedPart, IContentablePart {
    name: string
@@ -76,21 +77,29 @@ export class RulePartKeyword extends RulePart implements INamedPart {
 }
 
 export class RulePartTag extends RulePart implements ITagPart, IContentablePart {
-   openBreaket: string
-   closeBreaket: string
-   endCloseBreaket: string
-   tagName: IRulePart[]
    attrValue: IRulePart[]
-   content: IRulePart[]
+   tagContent: IRulePart[]
+   content: IRulePart[] = []
 
-   constructor(openBreaket: string, closeBreaket: string, endCloseBreaket: string, tagName: IRulePart[], attrValue: IRulePart[], content: IRulePart[]) {
+   constructor(attrValue: IRulePart[], tagContent: IRulePart[]) {
       super(PartType.tag)
 
-      this.content = content
-      this.openBreaket = openBreaket
+      this.tagContent = tagContent
       this.attrValue = attrValue
-      this.closeBreaket = closeBreaket
-      this.endCloseBreaket = endCloseBreaket
-      this.tagName = tagName
+   }
+}
+
+export class RulePartSet extends RulePart implements ISetPart, IContentablePart {
+   exclude: boolean
+   multiple: boolean
+   rules: string[]
+   content: IRulePart[] = []
+
+   constructor(exclude: boolean, multiple: boolean, rules: string[]) {
+      super(PartType.set)
+
+      this.exclude = exclude
+      this.multiple = multiple
+      this.rules = rules
    }
 }

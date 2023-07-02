@@ -1,10 +1,12 @@
+import Match from "./Match"
+
 export default interface MatchGroups {
-   keyword: string[]
-   text: string[]
-   string: string[]
-   number: string[]
-   boolean: string[]
-   scope: string[]
-   iter: string[]
+   keyword: Match[]
+   text: Match[]
+   string: Match[]
+   number: Match[]
+   boolean: Match[]
+   scope: Match[]
+   iter: Match[]
    rules: object
 }

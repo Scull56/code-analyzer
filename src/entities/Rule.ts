@@ -37,7 +37,7 @@ export default class Rule<T extends SyntaxItem>{
 
    private static closeKeySymbols = [']', ')', '}', '#']
 
-   private static keyWords = ['string', 'text', 'number', 'boolean', 'rule', 'iter', 'tag']
+   private static keyWords = ['string', 'text', 'number', 'boolean', 'rule', 'iter', 'tag', 'set', 'event']
 
    /**
     * Constructor of Rule class
@@ -209,6 +209,14 @@ export default class Rule<T extends SyntaxItem>{
 
                               case 'tag':
                                  mode = PartType.tag
+                                 break;
+
+                              case 'set':
+                                 mode = PartType.set
+                                 break;
+
+                              case 'event':
+                                 mode = PartType.event
                                  break;
 
                               default:
@@ -448,6 +456,10 @@ export default class Rule<T extends SyntaxItem>{
 
                break;
 
+            case PartType.set:
+
+               break
+
             case PartType.var:
 
                let varName = ''
@@ -508,11 +520,7 @@ export default class Rule<T extends SyntaxItem>{
                      content: tagPartContent
                   }
 
-                  if (currentPartScope.tagName.length == 0) {
-
-                     currentPartScope.tagName = tagPartContent
-                  }
-                  else if (currentPartScope.attrValue.length == 0) {
+                  if (currentPartScope.attrValue.length == 0) {
 
                      currentPartScope.attrValue = tagPartContent
                   }
@@ -530,67 +538,7 @@ export default class Rule<T extends SyntaxItem>{
                // else extract from string breakets of tag
                else if (current == '(') {
 
-                  let openBreaket: string = ''
-                  let closeBreaket: string = ''
-                  let endCloseBreaket: string = ''
-
-                  let string = ''
-
-                  for (let j = 0; j < pattern.length; j++) {
-
-                     if (pattern[j] == ' ') {
-
-                        continue
-                     }
-
-                     if (pattern[j] == '/' && !shield) {
-
-                        shield = true
-
-                        continue
-                     }
-
-                     if ((pattern[j] == ',') && !shield) {
-
-                        if (string.length == 0) {
-                           // throw error
-                        }
-
-                        if (openBreaket == '') {
-
-                           openBreaket = string
-
-                           string = ''
-                        }
-
-                        if (closeBreaket == '') {
-
-                           closeBreaket = string
-
-                           string = ''
-                        }
-
-                        if (endCloseBreaket == '') {
-
-                           endCloseBreaket = string
-
-                           string = ''
-
-                           i = --j
-
-                           break
-                        }
-                     }
-
-                     if (shield) {
-
-                        shield = false
-                     }
-
-                     string += pattern[j]
-                  }
-
-                  partObj = new RulePartTag(openBreaket, closeBreaket, endCloseBreaket, [], [], [])
+                  partObj = new RulePartTag([], [])
 
                   addInScope(partObj)
                   addScope(partObj as RulePartContent, EndType.scope)
@@ -601,8 +549,11 @@ export default class Rule<T extends SyntaxItem>{
 
                break;
 
+            case PartType.event:
+
+               break
             default:
-               break;
+               break
          }
       }
 

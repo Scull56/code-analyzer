@@ -33,5 +33,12 @@ export default interface ReservedList {
    stringDefiners: string[]
    keySymbols: string[]
    endSymbols: string[]
-   spaces?: number
+   spaces?: number,
+   startOpenBreaket: string,
+   startCloseBreaket: string,
+   lineOpenBreaket: string,
+   lineCloseBreaket: string,
+   endOpenBreaket: string,
+   endCloseBreaket: string,
+   attrAssigment: string
 }

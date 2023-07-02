@@ -9,6 +9,7 @@ export enum PartType {
    or,
    orPart,
    rule,
+   set,
    var,
    iter,
    tag,
@@ -19,7 +20,8 @@ export enum PartType {
    noNext,
    oneMore,
    zeroMore,
-   maybe
+   maybe,
+   event
 }
 
 export interface IRulePart {
@@ -39,9 +41,12 @@ export interface IBreaketPart {
 }
 
 export interface ITagPart {
-   openBreaket: string
-   closeBreaket: string
-   endCloseBreaket: string
-   tagName: IRulePart[]
    attrValue: IRulePart[]
+   tagContent: IRulePart[]
+}
+
+export interface ISetPart {
+   exclude: boolean
+   multiple: boolean
+   rules: string[]
 }

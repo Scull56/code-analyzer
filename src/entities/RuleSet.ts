@@ -4,14 +4,9 @@ import { IRulePart, PartType, type IContentablePart } from "../types/RulePart";
 import { removeArrElem } from '../utils/data';
 import type ReservedList from "../types/ReservedList";
 import MatchGroups from "./MatchGroups";
-import type SyntaxItem from "../types/SyntaxItem";
-
-interface Match {
-   type: PartType,
-   start: number,
-   end: number,
-   value: string
-}
+import { IMatch } from "../types/Match";
+import { TagMatch } from "./Match";
+import type ISyntaxItem from "../types/SyntaxItem";
 
 class RuleInfo {
    name: string
@@ -23,16 +18,14 @@ class RuleInfo {
    indexes: number[] = [0]
    // list of objects with variables, which part contain inside
    variables: object[] = [{}]
-   // list of validation results that contains base group matches and matches for rule match variables
-   strings: Match[][] = [[]]
+   // list of matches of parts
+   matches: IMatch[][] = [[]]
    // list of validity checks parts of rules 
    checks: boolean[] = [true]
-   // list of object for scopesQueues
-   matchesArr: Match[][] = [[]]
    // list of part ?, which are now processed
    permissibles: [] = []
 
-   constructor(rule: Rule<any>, mainPartIter: number) {
+   constructor(rule: Rule<ISyntaxItem>, mainPartIter: number) {
       this.name = rule.name
       this.parts.push(new RulePartContent(PartType.main, rule.parts))
       this.iters.push(mainPartIter)
@@ -42,16 +35,13 @@ class RuleInfo {
 class ScopeInfo {
    start: number
    end: number
-   rules: RuleInfo[]
-   index: number
-   matches: SyntaxItem[]
+   rules: RuleInfo[] = []
+   index: number = 0
+   matches: ISyntaxItem[] = []
 
-   constructor(start: number, end: number, rules: RuleInfo[], index: number, matches: SyntaxItem[]) {
+   constructor(start: number, end: number) {
       this.start = start
       this.end = end
-      this.rules = rules
-      this.index = index
-      this.matches = matches
    }
 }
 
@@ -65,7 +55,7 @@ interface MatchError {
 
 export interface RuleMatches {
    groups: MatchGroups
-   matches: SyntaxItem[]
+   matches: ISyntaxItem[]
    errors: MatchError[]
 }
 
@@ -73,22 +63,22 @@ export interface RuleMatches {
  * Set of rules that can be used to parse code
  */
 export default class RuleSet {
-   rules: Rule<any>[] = []
+   rules: Rule<ISyntaxItem>[] = []
    reserved: ReservedList
 
    /**
     * Constructor of RuleSet class
     * 
-    * @param {Rule<any>[]}    rules - array of rules with which code will processed
+    * @param {Rule<ISyntaxItem>[]}    rules - array of rules with which code will processed
     * @param {ReservedList}   reserved - object with reserved symbols and words
     */
-   constructor(rules: Rule<SyntaxItem>[], reserved: ReservedList) {
+   constructor(rules: Rule<ISyntaxItem>[], reserved: ReservedList) {
 
       this.addRule(rules)
       this.reserved = reserved
    }
 
-   addRule(rules: Rule<any>[]) {
+   addRule(rules: Rule<ISyntaxItem>[]) {
 
       this.rules.push(...rules)
    }
@@ -117,8 +107,13 @@ export default class RuleSet {
       // if a number is placed, it means that the tab area has been opened. If a line starting with < was inserted, this is a tag, otherwise the string means () {} []
       let breakets: (string | number)[] = []
 
+      // if was added new scope in queue, set true for continue main while loop
+      let newScope = false
+
       // list of text's areas for processing text by nesting level
-      let scopesQueue: ScopeInfo[] = [new ScopeInfo(0, code.length, [], 0, result.matches)]
+      let scopesQueue: ScopeInfo[] = [new ScopeInfo(0, code.length)]
+
+      result.matches = (scopesQueue[0] as ScopeInfo).matches
 
       let scope: ScopeInfo
 
@@ -126,9 +121,8 @@ export default class RuleSet {
       let parts: IContentablePart[]
       let indexes: number[]
       let variables: object[]
-      let strings: Match[][]
+      let matches: IMatch[][]
       let checks: boolean[]
-      let matchesArr: Match[][]
       let permissibles: []
 
       // process the code while there are areas of text
@@ -139,7 +133,7 @@ export default class RuleSet {
          // init data object for every rules
          if (scope.rules.length == 0) {
 
-            scope.rules = this.rules.map(rule => new RuleInfo(rule, (scopesQueue[0] as ScopeInfo).start))
+            scope.rules = this.rules.map(rule => new RuleInfo(rule, scope.start))
          }
 
          // select the most appropriate rule one by one
@@ -151,9 +145,8 @@ export default class RuleSet {
             parts = rule.parts
             indexes = rule.indexes
             variables = rule.variables
-            strings = rule.strings
+            matches = rule.matches
             checks = rule.checks
-            matchesArr = rule.matchesArr
             permissibles = rule.permissibles
 
             // process rule while rule's main scope in pattern wasn't delete or pattern pass validity check
@@ -167,7 +160,7 @@ export default class RuleSet {
                if (checks[checks.length - 1]) {
 
                   // if the current part of the rule has not yet been fully processed, process it's nested part of rule
-                  if (indexes[indexes.length - 1] as number <= (parts[parts.length - 1] as IContentablePart).content.length - 1) {
+                  if (indexes[indexes.length - 1] as number < (parts[parts.length - 1] as IContentablePart).content.length) {
 
                      part = (parts[parts.length - 1] as IContentablePart).content[indexes[indexes.length - 1] as number] as IRulePart
                      mode = part.type
@@ -232,7 +225,7 @@ export default class RuleSet {
                            }
 
 
-                           addMatch(rule, u, word)
+                           addMatch(rule, u)
 
                            break
 
@@ -247,7 +240,7 @@ export default class RuleSet {
                         case PartType.prev:
                         case PartType.noPrev:
 
-                           addScope()
+                           addContaintable(part as RulePartContent)
 
                            break
 
@@ -262,27 +255,27 @@ export default class RuleSet {
                            content.shift()
                            content.push(target as IRulePart)
 
-                           addScope()
+                           addContaintable(part as RulePartContent)
 
                            break
 
                         case PartType.string:
 
-                           let breaket = code[iters[iters.length - 1] as number]
+                           let b: number = iters[iters.length - 1] as number
+
+                           let breaket = code[b]
 
                            if (this.reserved.stringDefiners.indexOf(breaket as string) > -1) {
 
                               let string = ''
 
-                              let u: number = iters[iters.length - 1] as number
-
                               let check = false
 
-                              for (u; u < code.length; u++) {
+                              for (b; b < code.length; b++) {
 
-                                 if (code[u] != breaket || code[u - 1] == '\\') {
+                                 if (code[b] != breaket || code[b - 1] == '\\') {
 
-                                    string += code[u]
+                                    string += code[b]
                                  }
                                  else {
 
@@ -294,18 +287,18 @@ export default class RuleSet {
 
                               if (check) {
 
-                                 addMatch(rule, u, string)
+                                 addMatch(rule, b)
                               }
                               else {
 
-                                 addMatch(rule, iters[iters.length - 1] as number, breaket as string)
+                                 addMatch(rule, iters[iters.length - 1] as number)
 
                                  checks[checks.length - 1] = false
                               }
                            }
                            else {
 
-                              addMatch(rule, iters[iters.length - 1] as number, breaket as string)
+                              addMatch(rule, iters[iters.length - 1] as number)
 
                               checks[checks.length - 1] = false
                            }
@@ -352,19 +345,17 @@ export default class RuleSet {
                               number += code[l]
                            }
 
-                           addMatch(rule, l, number)
+                           addMatch(rule, l)
 
                            break
 
                         case PartType.text:
 
-                           let text: string = ''
+                           let iter = iters[iters.length - 1] as number
 
-                           let end: number
+                           let end: number = iter
 
                            let nextPart: IRulePart | undefined = (parts[parts.length - 1] as IContentablePart).content[indexes[indexes.length - 1] as number + 1]
-
-                           let iter = iters[iters.length - 1] as number
 
                            if (nextPart) {
 
@@ -420,7 +411,7 @@ export default class RuleSet {
 
                                     case PartType.tag:
 
-                                       breakWords.push((nextPart as RulePartTag).openBreaket)
+                                       breakWords.push(this.reserved.endOpenBreaket)
 
                                        break
 
@@ -465,15 +456,9 @@ export default class RuleSet {
 
                               let breakIndexes: number[] = breakWords.map(item => code.indexOf(item, iter))
 
-                              let minIndex = breakIndexes.sort((a, b) => a - b)[0] as number
-
-                              text = code.slice(iter, minIndex)
-
-                              end = minIndex
+                              end = breakIndexes.sort((a, b) => a - b)[0] as number
                            }
                            else {
-
-                              let breakSymbol
 
                               let i = 1
 
@@ -491,39 +476,85 @@ export default class RuleSet {
                                  scope = parts[parts.length - i]
                               }
 
+                              if (!(scope instanceof RulePartScope || scope instanceof RulePartTag)) {
+
+                                 let scopeInfo = scopesQueue[scopesQueue.length - 1] as ScopeInfo
+
+                                 let scopeRule = scopeInfo.rules[scopeInfo.index] as RuleInfo
+
+                                 scope = scopeRule.parts[scopeRule.parts.length - 1]
+                              }
+
                               if (scope instanceof RulePartScope) {
 
                                  if (scope.breaket == '(' || scope.breaket == '{' || scope.breaket == '[') {
 
                                     end = code.indexOf(Rule.breakets.get(scope.breaket) as string, iter)
-
-                                    text = code.slice(iter, end)
                                  }
 
                                  if (scope.breaket == '&') {
 
+                                    let currentTabCounts = breakets[breakets.length - 1] as number
 
+                                    let tabIndex = iter
+
+                                    while (true) {
+
+                                       tabIndex = code.indexOf('/n', tabIndex) + 1;
+
+                                       if (tabIndex == -1) {
+
+                                          end = code.length - 1
+
+                                          break
+                                       }
+
+                                       let tabCount = 0;
+
+                                       let repeat = false;
+
+                                       while (true) {
+
+                                          if (code[tabIndex + tabCount] == ' ') {
+
+                                             ++tabCount
+                                          }
+                                          else if (code[tabIndex + tabCount] == '/n') {
+
+                                             repeat = true
+
+                                             break
+                                          }
+                                          else {
+
+                                             break
+                                          }
+                                       }
+
+                                       if (repeat) {
+
+                                          tabIndex += tabCount + 1
+
+                                          continue
+                                       }
+
+                                       if (tabCount <= currentTabCounts) {
+
+                                          end = tabIndex
+
+                                          break
+                                       }
+                                    }
                                  }
                               }
-                              else if (scope instanceof RulePartTag) {
 
-                                 for (let i = 0; i < code.length; i++) {
+                              if (scope instanceof RulePartTag) {
 
-
-
-                                 }
-
-                              } else {
-
-                                 let scope = scopesQueue[scopesQueue.length - 1] as ScopeInfo
-
-                                 end = scope.end
-
-                                 text = code.slice(iters[iters.length - 1], end)
+                                 end = code.indexOf(this.reserved.endOpenBreaket, iter)
                               }
                            }
 
-                           addMatch(rule, end, text)
+                           addMatch(rule, end)
 
                            break
 
@@ -535,7 +566,7 @@ export default class RuleSet {
 
                               (part as RulePartNamed).content.push(...partRule.parts)
 
-                              addScope()
+                              addContaintable(part as RulePartContent)
                            }
                            else {
 
@@ -546,7 +577,9 @@ export default class RuleSet {
 
                         case PartType.scope:
 
-                           if ((part as RulePartScope).breaket == '&') {
+                           let scopePart = part as RulePartScope
+
+                           if (scopePart.breaket == '&') {
 
                               let i = iters[iters.length - 1] as number
 
@@ -596,28 +629,105 @@ export default class RuleSet {
 
                               breakets.push(spacesCount)
                            }
-                           else {
 
-                              symbol = code[iters[iters.length - 1] as number]
+                           if ((symbol == '{' || symbol == '[' || symbol == '(') && scopePart.breaket == symbol) {
 
-                              if ((symbol == '{' || symbol == '[' || symbol == '(') && (part as RulePartScope).) {
-
-                                 breakets.push(symbol)
-                              }
-                              else {
-
-                                 // throw error
-                              }
+                              breakets.push(symbol)
                            }
 
-                           addScope()
+                           if (scopePart.content.length > 0) {
+
+                              addScope()
+                           }
+
+                           addContaintable(scopePart)
 
                            break
 
                         case PartType.tag:
 
-                           addScope()
+                           let tagPart = part as RulePartTag
+
+                           let currentMatches = matches[matches.length - 1] as IMatch[]
+
+                           let match = currentMatches[currentMatches.length - 1] as IMatch
+
+                           let i = iters[iters.length - 1] as number
+
+                           if (!(match instanceof TagMatch)) {
+
+                              let openBreaket = code.slice(i, i + this.reserved.startOpenBreaket.length)
+
+                              if (openBreaket != this.reserved.startOpenBreaket) {
+                                 // throw error
+                              }
+
+                              for (i; i < code.length; i++) {
+                                 if (code[i] != ' ') {
+                                    break
+                                 }
+                              }
+
+                              let tagName = ''
+
+                              for (i; i < code.length; i++) {
+                                 if (code[i] == ' ') {
+                                    break
+                                 }
+
+                                 tagName += code[i]
+                              }
+
+                              addMatch<TagMatch>(rule, iters[iters.length - 1] as number)
+
+                              match = currentMatches[currentMatches.length - 1] as TagMatch
+
+                              (match as TagMatch).tagName = tagName
+                           }
+
+                           for (i; i < code.length; i++) {
+                              if (code[i] != ' ') {
+                                 break
+                              }
+                           }
+
+                           // считать имя атрибута
+                           // добавить в content текущего part attrValue правила
+                           // при закрытии contantble part возобновить его обраотку и добавить полученный match в Map
+                           // повторить здесь до тех пор, пока не обнаружим startCloseBreaket
+
+                           let attrName
+
+
+
+                           let index: number = 0
+
+                           for (let i = 0; i < this.reserved.startOpenBreaket.length; i++) {
+
+                              index = iters[iters.length - 1] as number + i
+
+                              if (code[index] != undefined) {
+
+                                 symbols += code[index]
+                              }
+                              else {
+
+                                 break
+                              }
+                           }
+
+                           if (symbols == this.reserved.startOpenBreaket) {
+
+
+                           }
+                           else {
+                              // throw error
+                           }
+
+                           addContaintable(part as RulePartTag)
+
                            break
+
                         default:
                            break
                      }
@@ -625,7 +735,7 @@ export default class RuleSet {
                   // if current part of rule was processed already
                   else {
 
-                     part = pattern[pattern.length - 1]
+                     part = parts[parts.length - 1]
 
                      // process part ?, which is facing the current part, if it is
                      let currentPermissible = permissibles[permissibles.length - 1]
@@ -998,10 +1108,19 @@ export default class RuleSet {
                }
 
                // if there are more rules that might fit, stop process current rule
-               if (rules.length > 1) {
+               if (scope.rules.length > 1) {
 
                   break
                }
+            }
+
+            if (newScope) {
+
+               newScope = false
+
+               scope.index = j
+
+               break
             }
 
             // delete rule if it fails the test and there are more rules that might fit
@@ -1119,54 +1238,68 @@ export default class RuleSet {
 
       function addScope() {
 
-         iters.push(iters[iters.length - 1])
-         pattern.push(part)
+         let start = iters[iters.length - 1] as number;
+
+         let info = new ScopeInfo(start, code.length);
+
+         scopesQueue.push(info)
+      }
+
+      function addContaintable(part: IContentablePart) {
+
+         iters.push(iters[iters.length - 1] as number)
+         parts.push(part)
          indexes.push(0)
          checks.push(true)
-         strings.push([])
-         matchesArr.push([])
+         matches.push([])
          variables.push({})
       }
 
-      function addMatch(rule: RuleInfo, end: number, value: string) {
+      function addMatch<T extends IMatch>(rule: RuleInfo, end: number) {
 
-         let match: Match = {
+         let start = rule.iters[rule.iters.length - 1] as number;
+
+         let match = {
             type: mode,
-            start: rule.iters[rule.iters.length - 1],
+            start,
             end,
-            value
-         }
+            value: code.slice(start, end)
+         } as T;
 
-         rule.strings[rule.strings.length - 1].push(match)
+         (rule.matches[rule.matches.length - 1] as IMatch[]).push(match)
 
          rule.iters[rule.iters.length - 1] = end
       }
 
       function closeScope() {
 
-         strings[strings.length - 2].push(...strings[strings.length - 1])
-         matchesArr[matchesArr.length - 2].push(...matchesArr[matchesArr.length - 1])
-         iters[iters.length - 2] = iters[iters.length - 1]
+         let prevMatches = matches[matches.length - 2] as IMatch[]
+
+         prevMatches.push(...matches[matches.length - 1] as IMatch[])
+
+         iters[iters.length - 2] = iters[iters.length - 1] as number
 
          for (let key in variables[variables.length - 1]) {
 
-            if (variables[variables.length - 2][key]) {
+            let prevVariables = variables[variables.length - 2] as any
+            let currentVariables = variables[variables.length - 1] as any
 
-               variables[variables.length - 2][key].push(...variables[variables.length - 1][key])
+            if (prevVariables[key]) {
+
+               prevVariables[key].push(...currentVariables[key])
             }
             else {
 
-               variables[variables.length - 2][key] = variables[variables.length - 1][key]
+               prevVariables[key] = currentVariables[key]
             }
          }
 
          // delete data of this part of rule for processing next part of rule on next iteration of loop
-         pattern.pop()
+         parts.pop()
          indexes.pop()
-         strings.pop()
+         matches.pop()
          checks.pop()
          iters.pop()
-         matchesArr.pop()
          variables.pop()
       }
 
